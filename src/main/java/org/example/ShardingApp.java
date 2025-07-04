@@ -30,39 +30,73 @@ public class ShardingApp {
                 List.of(shardingConfig), new Properties());
         // takes in a map of string to datasource, as well as collection of RuleConfiguration,
 
+        testSharding(shardingDataSource);
         //insert data
-        try(Connection conn = shardingDataSource.getConnection()) {
-            for(int i = 1; i <= 4; i++) {
-                PreparedStatement ps = conn.prepareStatement("INSERT INTO user (id,name) VALUES(?, ?)");
-                ps.setLong(1, i);
-                ps.setString(2, "USER_" + i);
-                ps.executeUpdate();
-                System.out.println("Inserted User_" + i);
-            }
-        }
-
         System.out.println("Done.");
     }
+
+    private static void testSharding(DataSource source) {
+        try(Connection conn = source.getConnection()) {
+            createTablesIfNotExist(conn);
+           insertTestData(conn);
+        } catch (SQLException e) {
+            System.out.println(e.getMessage());
+        }
+    }
+
+    private static void insertTestData(Connection conn) throws SQLException {
+        for(int i = 1; i <= 10; i++) {
+            PreparedStatement ps = conn.prepareStatement("INSERT INTO user (id,name) VALUES(?, ?)");
+            ps.setLong(1, i);
+            ps.setString(2, "USER_" + i);
+            ps.executeUpdate();
+            System.out.println("Inserted User_" + i);
+        }
+    }
+
+    private static void createTablesIfNotExist(Connection conn) throws SQLException {
+        String createTableSQL = """
+                -- ds_0.`user` definition
+                
+                CREATE TABLE `user` (
+                  `id` bigint NOT NULL,
+                  `name` varchar(50) DEFAULT NULL,
+                  PRIMARY KEY (`id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+                """;
+        try(PreparedStatement statement = conn.prepareStatement(createTableSQL)) {
+            statement.execute();
+            System.out.println("Tables created successfully");
+        }
+    }
+
 
     private static ShardingRuleConfiguration createShardingRule() {
         ShardingRuleConfiguration shardingConfig = new ShardingRuleConfiguration();
 
-        ShardingTableRuleConfiguration tableRuleConfiguration = new ShardingTableRuleConfiguration("user",
-                "ds_${0..1}.user"); // used to define sharding rules for individual tables
+        ShardingTableRuleConfiguration useTableRule = new ShardingTableRuleConfiguration("user",
+                "ds_${0..1}.user_${0..1}"); // used to define sharding rules for individual tables
         //used to specify how a logical table(user) is distributed across multiple physical tables
 
-        tableRuleConfiguration.setDatabaseShardingStrategy(new
-                StandardShardingStrategyConfiguration("id", "mod_sharding"));
+        // database sharding strategy(shard by id % 2)
         //Used to configure how data should be distributed across multiple databases
+        useTableRule.setDatabaseShardingStrategy(new
+                StandardShardingStrategyConfiguration("id", "database_mod"));
 
-        //configure sharding algorithm
-        shardingConfig.getTables().add(tableRuleConfiguration); // add in this ShardingTableRuleConfiguration
+        //table sharding strategy (shard by id % 2)
+        useTableRule.setTableShardingStrategy(new StandardShardingStrategyConfiguration("id", "table_mod"));
 
-        Properties props = new Properties();
-        props.setProperty("algorithm-expression", "ds_$->{id%2}");
-        shardingConfig.getShardingAlgorithms().put("mod_sharding",new AlgorithmConfiguration("INLINE", props));
-        //Insert our AlgorithmConfiguration
+        // Add table rule to sharding configuration
+        shardingConfig.getTables().add(useTableRule); // add in this ShardingTableRuleConfiguration
 
+        // Configure sharding algorithm
+        Properties databaseProps = new Properties();
+        databaseProps.setProperty("algorithm-expression", "ds_${id % 2}");
+        shardingConfig.getShardingAlgorithms().put("database_mod",new AlgorithmConfiguration("INLINE", databaseProps));
+
+        Properties tableProps = new Properties();
+        tableProps.setProperty("algorithm-expression", "user_${id % 2}");
+        shardingConfig.getShardingAlgorithms().put("table_mod", new AlgorithmConfiguration("INLINE", tableProps));
         //Inline expression is a piece of Groovy code in essence, which can return the corresponding real data
         // source or table name according to the computation method of sharding keys.
         return shardingConfig;
@@ -80,6 +114,23 @@ public class ShardingApp {
         String username = dotenv.get("DB_USER");
         ds.setUsername(username);
         ds.setPassword(password);
+
+        //connection pool settings
+        ds.setMaximumPoolSize(10);
+        //Opening and closing a connection is an expensive operation, hence it helps us using the existing connections
+        // from the pool whenever a connection is required. This sets the maximum number of connections that can be held in
+        // the connection pool.
+        ds.setMinimumIdle(5);
+        //defines the minimum number of idle connections that the pool should try to maintain. An idle connection is one
+        // that is not in use but is kept ready and in open state.
+        ds.setConnectionTimeout(30000);
+        //defines the maximum time application is willing to wait for a connection from the pool
+        ds.setIdleTimeout(600000);
+        //specifies the maximum amount of time a connection should remain idle before it closes. It helps in releasing
+        // resources and prevents connection leaks.
+        ds.setMaxLifetime(1800000);
+        //sets the maximum lifetime for a connection in the pool, after this the connection is closed and is replaced
+        // with the new connection in the pool.
         return ds;
     }
 }
