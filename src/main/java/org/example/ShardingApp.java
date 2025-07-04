@@ -58,7 +58,7 @@ public class ShardingApp {
         String createTableSQL = """
                 -- ds_0.`user` definition
                 
-                CREATE TABLE `user` (
+                CREATE TABLE IF NOT EXISTS `user` (
                   `id` bigint NOT NULL,
                   `name` varchar(50) DEFAULT NULL,
                   PRIMARY KEY (`id`)
@@ -90,12 +90,13 @@ public class ShardingApp {
         shardingConfig.getTables().add(useTableRule); // add in this ShardingTableRuleConfiguration
 
         // Configure sharding algorithm
+        // Database algorithm: ID / 4 % 2 (groups of 4 alternate between databases)
         Properties databaseProps = new Properties();
-        databaseProps.setProperty("algorithm-expression", "ds_${id % 2}");
+        databaseProps.setProperty("algorithm-expression", "ds_${ id.intdiv(4) % 2}");
         shardingConfig.getShardingAlgorithms().put("database_mod",new AlgorithmConfiguration("INLINE", databaseProps));
 
         Properties tableProps = new Properties();
-        tableProps.setProperty("algorithm-expression", "user_${id % 2}");
+        tableProps.setProperty("algorithm-expression", "user_${ id.intdiv(2) % 2}");
         shardingConfig.getShardingAlgorithms().put("table_mod", new AlgorithmConfiguration("INLINE", tableProps));
         //Inline expression is a piece of Groovy code in essence, which can return the corresponding real data
         // source or table name according to the computation method of sharding keys.
