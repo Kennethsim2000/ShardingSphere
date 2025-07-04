@@ -93,10 +93,12 @@ public class ShardingApp {
         // Database algorithm: ID / 4 % 2 (groups of 4 alternate between databases)
         Properties databaseProps = new Properties();
         databaseProps.setProperty("algorithm-expression", "ds_${ id.intdiv(4) % 2}");
+        // since each database has two tables, we will partition every groups of 4 into the databases, with 2 for each table
         shardingConfig.getShardingAlgorithms().put("database_mod",new AlgorithmConfiguration("INLINE", databaseProps));
 
         Properties tableProps = new Properties();
         tableProps.setProperty("algorithm-expression", "user_${ id.intdiv(2) % 2}");
+        // We will then split into groups of 2, and modulo 2 to determine which table to map to
         shardingConfig.getShardingAlgorithms().put("table_mod", new AlgorithmConfiguration("INLINE", tableProps));
         //Inline expression is a piece of Groovy code in essence, which can return the corresponding real data
         // source or table name according to the computation method of sharding keys.
